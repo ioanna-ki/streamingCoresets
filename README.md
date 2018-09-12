@@ -20,6 +20,8 @@ args(4) = directory of test data
 
 #### training and test data (2-dimensions) example:
 0.4,2.1
+
 1.6,15.9
+
 4.2,1.4
 ....
