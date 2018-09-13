@@ -44,19 +44,20 @@ object ClusteringTrainEvaluate {
       println("end printing")
     }))
 */
+    //convert resulted coreset's format to vector for training
     val coresetVector = coreset.map(c=>c._2)
       .flatMap(line => line)
       .map(e => {
         val p = "[" + e.in.toString + "]"
         p
     }).map(Vectors.parse)
-
+//train mllib model 
     val model = new StreamingKMeans()
           .setK(kOption)
           .setDecayFactor(1.0)
           .setRandomCenters(dim, 0.0)
    model.trainOn(coresetVector)
-
+//test mllib model
     val out = testExamples.map(lp=>(lp.label,model.latestModel.predict(lp.features)))
     model.predictOnValues(testExamples.map(lp => (lp.label, lp.features))) foreachRDD { (rdd, time) =>
       println(s"++++\ntime: $time")
@@ -71,24 +72,7 @@ object ClusteringTrainEvaluate {
     ssc.start()
     ssc.awaitTermination()
   }
-  def transformInput2(rdd:RDD[Example]):RDD[(Int,Example)] = {
-    val partitioned = rdd.zipWithUniqueId().partitionBy(new HashPartitioner(10))
-
-    val mapped =   partitioned.mapPartitionsWithIndex{
-                        // 'index' represents the Partition No
-                       // 'iterator' to iterate through all elements
-                      //                         in the partition
-      (index, iterator) => {
-                            val myList = iterator.toList
-                             // In a normal user case, we will do the
-                             // the initialization(ex : initializing database)
-                             // before iterating through each element
-        myList.map(x => (index, x._1)).iterator
-                           }
-                     }
-    mapped
-  }
-
+//give a key index for every n = coresetSize incoming examples
   def transformInput(rdd:RDD[Example],ssc:StreamingContext,coresetSize:Int):RDD[(Int,Example)] = {
     val acum = ssc.sparkContext.longAccumulator("cnt")
     rdd.map(ex=>{
@@ -97,9 +81,7 @@ object ClusteringTrainEvaluate {
       (cnt,ex)
     })
   }
-
-
-
+  //merge examples with the same key into an array
   def init(rdd: RDD[(Int, Example)], coresetSize: Int): RDD[(Int, Array[Example])] = {
     //  println("Init started...")
     val combined = rdd.groupBy(_._1)
@@ -108,6 +90,7 @@ object ClusteringTrainEvaluate {
     traverse(combined, coresetSize)
   }
 
+ //group arrays for every two consecutive keys and merge them with coreset tree algorithm 
   def traverse(rdd: RDD[(Int, Array[Example])], coresetSize: Int): RDD[(Int, Array[Example])] = {
      if(rdd.count>1) {
        val result = rdd.groupBy { case (k, _) => k / 2 }
@@ -129,6 +112,27 @@ object ClusteringTrainEvaluate {
       val coreset = tree.retrieveCoreset(tree.buildCoresetTree(cor._2, coresetSize), new Array[Example](0))
       (cor._1, coreset)
     })
+    
+    
+     /* def transformInput2(rdd:RDD[Example]):RDD[(Int,Example)] = {
+    val partitioned = rdd.zipWithUniqueId().partitionBy(new HashPartitioner(10))
+
+    val mapped =   partitioned.mapPartitionsWithIndex{
+                        // 'index' represents the Partition No
+                       // 'iterator' to iterate through all elements
+                      //                         in the partition
+      (index, iterator) => {
+                            val myList = iterator.toList
+                             // In a normal user case, we will do the
+                             // the initialization(ex : initializing database)
+                             // before iterating through each element
+        myList.map(x => (index, x._1)).iterator
+                           }
+                     }
+    mapped
+  }
+*/
+    
     coresetsRDD
   }
 
