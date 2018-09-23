@@ -20,19 +20,19 @@ object ClusteringTrainEvaluate {
     val kOption = args(1).toInt
     val dim = args(2).toInt
     val trainPath = args(3).toString
-    val testPath = args(4).toString
+   // val testPath = args(4).toString
 
     val trainExamples = ssc.textFileStream(trainPath).map(arr => {
       val tokens = arr.split(",")
       new Example(new DenseInstance(tokens.map(_.toDouble)))
     })
 
-    val testExamples =ssc.textFileStream(testPath)
+  /*  val testExamples =ssc.textFileStream(testPath)
        .map(arr => {
          val coord: String = "("+Random.nextInt(kOption)+",["+arr+"])"
              coord
        }).map(LabeledPoint.parse)
-
+  */
     val examples = trainExamples.transform(transformInput(_,ssc,coresetSize))
     val coreset = examples.transform(rdd => {
       init(rdd, coresetSize)
@@ -51,22 +51,33 @@ object ClusteringTrainEvaluate {
         val p = "[" + e.in.toString + "]"
         p
     }).map(Vectors.parse)
-//train mllib model 
+    
+ //train mllib model 
     val model = new StreamingKMeans()
           .setK(kOption)
           .setDecayFactor(1.0)
           .setRandomCenters(dim, 0.0)
    model.trainOn(coresetVector)
-//test mllib model
-    val out = testExamples.map(lp=>(lp.label,model.latestModel.predict(lp.features)))
-    model.predictOnValues(testExamples.map(lp => (lp.label, lp.features))) foreachRDD { (rdd, time) =>
-      println(s"++++\ntime: $time")
-      val lm = model.latestModel
-      lm.clusterCenters.foreach(v=>println(v.toString))
-      rdd.keyBy(_._2).groupByKey.map{
-        case (key, iter) => (key, iter.map(_._1))
-      } foreach println
-    }
+  //assign input to clusters
+  val assigned = coresetVector.map(ex=> {
+      val clusters = model.latestModel().clusterCenters//.map(p => new Example(new DenseInstance(p.toArray)))
+      val assignedCl = clusters.foldLeft((0, Double.MaxValue, 0))(
+        (cl, centr) => {
+          val dist =  Vectors.sqdist(ex,centr)
+          if (dist < cl._2) ((cl._3, dist, cl._3 + 1))
+          else ((cl._1, cl._2, cl._3 + 1))
+        })._1
+      (assignedCl,ex)
+    })
+    //print results
+    assigned.print(100)
+    coresetVector.foreachRDD((rdd,time) =>{
+      println(s"time: $time")
+      println("latest model's cost: "+model.latestModel().computeCost(rdd))
+      println("latest model's centers: ")
+      model.latestModel().clusterCenters.foreach(v=>println("C: "+v.toString))
+
+    })
 
     //start the loop
     ssc.start()
